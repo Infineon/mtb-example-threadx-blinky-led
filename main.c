@@ -9,7 +9,7 @@
 *
 
 *******************************************************************************
-* Copyright 2021-2023, Cypress Semiconductor Corporation (an Infineon company) or
+* Copyright 2021-2024, Cypress Semiconductor Corporation (an Infineon company) or
 * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
 *
 * This software, including source code, documentation and related
@@ -49,14 +49,15 @@
 #include "cybsp.h"
 #include "cycfg_pins.h"
 #include "cyabs_rtos.h"
+#include "cy_retarget_io.h"
 /*******************************************************************************
 * Macros
 *******************************************************************************/
 #define BLINKY_TASK_NAME            ("Blinky")
-#define BLINKY_TASK_STACK_SIZE      (300)
+#define BLINKY_TASK_STACK_SIZE      1500
 #define BLINKY_TASK_PRIORITY        (2)
 #define MAIN_TASK_NAME              ("Main_task")
-#define MAIN_TASK_STACK_SIZE        (200)
+#define MAIN_TASK_STACK_SIZE        1000
 #define MAIN_TASK_PRIORITY          (1)
 
 /*Allocate buffer for task stack */
@@ -106,17 +107,20 @@ static void blinky_task(cy_thread_arg_t arg)
 {
     (void) arg;
 
+#ifdef CYBSP_USER_LED
     /* Initialize the User LED */
-    cyhal_gpio_init(CYBSP_USER_LED, CYHAL_GPIO_DIR_OUTPUT,
+    cyhal_gpio_init(CYBSP_USER_LED, CYHAL_GPIO_DIR_OUTPUT, \
                     CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
-
+#endif
     for(;;)
     {
         /* Block until the semaphore is given */
         cy_rtos_semaphore_get(&xSemaphore, CY_RTOS_NEVER_TIMEOUT);
 
+#ifdef CYBSP_USER_LED
         /* Toggle the USER LED state */
         cyhal_gpio_toggle(CYBSP_USER_LED);
+#endif
     }
 }
 
@@ -170,12 +174,29 @@ int main( )
 
     /* Initialize the device and board peripherals */
     result = cybsp_init();
-
     /* Board init failed. Stop program execution */
     if (result != CY_RSLT_SUCCESS)
     {
+        printf("BSP init failed \r\n");
         CY_ASSERT(0);
     }
+
+    /* Enable global interrupts */
+    __enable_irq();
+
+    /* Initialize retarget-io to use the debug UART port */
+    result = cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX,
+            CY_RETARGET_IO_BAUDRATE);
+    if (CY_RSLT_SUCCESS != result)
+    {
+        printf("cy_retarget_io_init Failed \r\n");
+    }
+
+    printf("\x1b[2J\x1b[;H");
+
+    printf("****************** "
+              "HAL: Blinky LED Example "
+              "****************** \r\n\n");
 
     /*Set up semaphore for task synchronization*/
     result = cy_rtos_semaphore_init(&xSemaphore,
@@ -183,6 +204,7 @@ int main( )
                                     INITIAL_COUNT);
     if (result != CY_RSLT_SUCCESS)
     {
+        printf("semaphore init failed \r\n");
         CY_ASSERT(0);
     }
 
@@ -192,11 +214,12 @@ int main( )
                                    MAIN_TASK_NAME,
                                    &main_task_stack,
                                    MAIN_TASK_STACK_SIZE,
-                                   MAIN_TASK_PRIORITY,
+                                   CY_RTOS_PRIORITY_NORMAL,
                                    0);
 
     if (result != CY_RSLT_SUCCESS)
     {
+        printf("Main thread creation failed \r\n");
         CY_ASSERT(0);
     }
 
@@ -206,17 +229,13 @@ int main( )
                                    BLINKY_TASK_NAME,
                                    &blinky_task_stack,
                                    BLINKY_TASK_STACK_SIZE,
-                                   BLINKY_TASK_PRIORITY,
+                                   CY_RTOS_PRIORITY_NORMAL,
                                    0);
     if (result != CY_RSLT_SUCCESS)
     {
+        printf("Blinky LED thread creation failed \r\n");
         CY_ASSERT(0);
     }
-
-
-   /* Enable global interrupts */
-    __enable_irq();
-
     return 0;
 
 }
